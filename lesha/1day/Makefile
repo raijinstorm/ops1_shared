@@ -1,15 +1,21 @@
+CC=gcc
+CFLAGS=-Wall -fsanitize=address,undefined
+LDFLAGS=-fsanitize=address,undefined
+
+FILE_NAME=prog5
+C_FILE=$(FILE_NAME:=.c)
+
 .PHONY: compile run
 
+run: $(FILE_NAME)
+	@./$(FILE_NAME)
 
-run: prog1
-	@./prog1
+prog1: $(C_FILE)
+	@$(CC) $(CFLAGS) $(C_FILE) -o $(FILE_NAME)
 
-prog1: prog1.c
-	@gcc -Wall prog1.c -o prog1
-
-hide_errors: prog1
-	@./prog1 2>/dev/null
+hide_errors: $(FILE_NAME)
+	@./$(FILE_NAME) 2>/dev/null
 
 clean:
-	@rm prog1
+	@rm $(FILE_NAME)
 
