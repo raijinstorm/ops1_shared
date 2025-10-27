@@ -7,11 +7,6 @@
 #include<errno.h>
 #include<string.h>
 
-enum Operation {
-    OPEN,
-    WRITE
-};
-
 int expand(char*** arr, size_t* capacity) {
     *capacity = (*capacity)==0?4:(*capacity*2);
     char** new_result = (char**)realloc(*arr, *capacity*sizeof(char*));
@@ -68,7 +63,7 @@ char** split(char* buffer, size_t* current) {
 int main() {
     char* buf = NULL;
     size_t size = 0;
-    fprintf(stdout, "Enter the <name of the file> <operation>(read/write): ");
+    fprintf(stdout, "Enter the <name of the file> <operation>(read/write/delete): ");
     ssize_t len = getline(&buf, &size,stdin);
     if (len == -1) {
         fprintf(stderr, "Error reading from stdin %s", strerror(errno));
@@ -154,9 +149,14 @@ int main() {
         close(fd);
     }
 
-    // else if (strcmp(parameters[1], "delete") == 0) {
-    //
-    // }
+    else if (strcmp(parameters[1], "delete") == 0) {
+        int unlinkStatus = unlink(parameters[0]);
+        if (unlinkStatus == -1) {
+            fprintf(stderr, "Error removing file: %s\n", strerror(errno));
+            return 1;
+        }
+    }
+
 
     //freeing parameters
     for (int i=0;i<num_of_parameters;i++) {
