@@ -7,6 +7,7 @@
 #include<ctype.h>
 #include <asm-generic/errno-base.h>
 #include<errno.h>
+#include<dirent.h>
 
 void write_stage2(char *filename) {
     struct stat st;
@@ -45,6 +46,58 @@ void write_stage2(char *filename) {
     }
     free(buf);
     close(fd);
+}
+
+void show_stage3(char* filename) {
+    struct stat st;
+    stat(filename, &st);
+    if (S_ISDIR(st.st_mode)) {
+        DIR* dir = opendir(filename);
+        if (dir == NULL) {
+            perror("opendir");
+            return;
+        }
+        struct dirent* ent;
+        while ((ent = readdir(dir)) != NULL) {
+            struct stat st2;
+            stat(ent->d_name, &st2);
+            if (S_ISREG(st2.st_mode)) {
+                fprintf(stdout, "%s\n", ent->d_name);
+            }
+        }
+    }
+    else if (S_ISREG(st.st_mode)) {
+        char buf[4096];
+        int fd = open(filename, O_RDONLY);
+        while (1) {
+            ssize_t off = 0;
+            ssize_t len = read(fd, buf, sizeof(buf));
+            if (len<0 && errno != EINTR) {
+                perror("read");
+                close(fd);
+                return;
+            }
+            if (len == 0) {
+                break;
+            }
+            while (off<len) {
+                int w = write(STDOUT_FILENO, buf+off, len-off);
+                if (w<0) {
+                    perror("write");
+                    close(fd);
+                    return;
+                }
+                off+=w;
+            }
+
+            //printing size
+            fprintf(stdout, "--File info--\nsize: %ld bytes\nUID of the owner: %d\nGID of the owner: %d\n\n", st.st_size, st.st_uid, st.st_gid);
+        }
+    }
+    else {
+        fprintf(stderr, "Type of the file is unknown!\n");
+        return;
+    }
 }
 
 int main() {
@@ -100,6 +153,9 @@ int main() {
 
         if (choice[0] == 'A') {
             write_stage2(filename);
+        }
+        if (choice[0] == 'B') {
+            show_stage3(filename);
         }
         free(filename);
         free(choice);
