@@ -27,6 +27,10 @@ void create_file(char* filename, ssize_t size, mode_t permissions, int perc) {
     if ((file = fopen(filename, "w+")) == NULL) {
         ERR("fopen");
     }
+    if (ftruncate(fileno(file), size) == -1) {
+        fclose(file);
+        ERR("ftruncate");
+    }
     for (int i=0;i<(size*perc)/100;i++) {
         if (fseek(file, rand()%size, SEEK_SET)) {
             ERR("fseek");
@@ -61,7 +65,7 @@ int main(int argc, char** argv) {
     if (name == NULL || permissions == (mode_t)-1 || size < 0) {
         usage(argv[0]);
     }
-    if (unlink(name)==-1 && errno != ENOENT) {
+    if (unlink(name) && errno != ENOENT) {
         ERR("unlink");
     }
     srand(time(NULL));
