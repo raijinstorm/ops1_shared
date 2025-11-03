@@ -1,0 +1,3 @@
+gcc -g -Wall -c task1.c -o task1.o
+gcc -g -Wall task1.o -o prog
+./prog
