@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
         pid_t pid;
         int status;
         sleep(1);
-        while ((pid=waitpid(-1,&status, WNOHANG))>0) {
+        while ((pid=waitpid(0,&status, WNOHANG))>0) {
             n--;
             if (WIFEXITED(status)) {
                 printf("child process %d exited with status %d\n", pid, WEXITSTATUS(status));
