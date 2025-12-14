@@ -1,0 +1,31 @@
+
+============================================================
+ Interactive Backup Management System
+------------------------------------------------------------
+ "There are those who make backups and those who will"
+============================================================
+
+[OK] Backup started for source: a
+     -> Target added: b
+
+Active backups:
+------------------------------------------------------------
+  a  ->  b
+[OK] Backup started for source: a
+     -> Target added: c
+
+Active backups:
+------------------------------------------------------------
+  a  ->  b
+  a  ->  c
+[ERROR] Backup already exists: a -> b
+[OK] Backup started for source: a
+     -> Target added: d
+     -> Target added: e
+
+Active backups:
+------------------------------------------------------------
+  a  ->  b
+  a  ->  c
+  a  ->  d
+  a  ->  e
