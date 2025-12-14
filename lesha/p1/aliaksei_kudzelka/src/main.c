@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/wait.h>
+#include <sys/inotify.h>
 
 struct BackupTarget {
     char *target_path;
@@ -445,6 +446,96 @@ static int copy_entry(const char *source_root, const char *target_root,
     return 0;
 }
 
+struct WatchEntry {
+    int wd;
+    char path[4096];
+    struct WatchEntry *next;
+};
+
+static struct WatchEntry *watch_list_append(struct WatchEntry **head, int wd, const char *path) {
+    struct WatchEntry *node = malloc(sizeof(struct WatchEntry));
+    if (!node)
+        return NULL;
+    node->wd = wd;
+    snprintf(node->path, sizeof(node->path), "%s", path);
+    node->next = *head;
+    *head = node;
+    return node;
+}
+
+static void watch_list_free(struct WatchEntry *head) {
+    while (head) {
+        struct WatchEntry *tmp = head->next;
+        free(head);
+        head = tmp;
+    }
+}
+
+static const char *watch_list_find(struct WatchEntry *head, int wd) {
+    for (struct WatchEntry *n = head; n; n = n->next) {
+        if (n->wd == wd)
+            return n->path;
+    }
+    return NULL;
+}
+
+static int remove_path_recursive(const char *path) {
+    struct stat st;
+    if (lstat(path, &st) == -1)
+        return (errno == ENOENT) ? 0 : -1;
+
+    if (S_ISDIR(st.st_mode)) {
+        DIR *d = opendir(path);
+        if (!d)
+            return -1;
+        struct dirent *de;
+        while ((de = readdir(d)) != NULL) {
+            if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+                continue;
+            char child[4096];
+            snprintf(child, sizeof(child), "%s/%s", path, de->d_name);
+            if (remove_path_recursive(child) != 0) {
+                closedir(d);
+                return -1;
+            }
+        }
+        closedir(d);
+        if (rmdir(path) != 0)
+            return -1;
+    } else {
+        if (unlink(path) != 0)
+            return -1;
+    }
+    return 0;
+}
+
+static int watch_directory_tree(int fd, const char *path, struct WatchEntry **list) {
+    int wd = inotify_add_watch(fd, path,
+                               IN_CREATE | IN_DELETE | IN_MODIFY | IN_MOVED_FROM |
+                                   IN_MOVED_TO | IN_ATTRIB | IN_DELETE_SELF | IN_CLOSE_WRITE |
+                                   IN_MOVE_SELF);
+    if (wd < 0)
+        return -1;
+    if (!watch_list_append(list, wd, path))
+        return -1;
+
+    DIR *d = opendir(path);
+    if (!d)
+        return -1;
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+            continue;
+        char child[4096];
+        snprintf(child, sizeof(child), "%s/%s", path, de->d_name);
+        if (de->d_type == DT_DIR) {
+            watch_directory_tree(fd, child, list);
+        }
+    }
+    closedir(d);
+    return 0;
+}
+
 static int sync_directories(const char *source_root, const char *target_root) {
     struct stat st;
     if (stat(source_root, &st) == -1)
@@ -454,6 +545,101 @@ static int sync_directories(const char *source_root, const char *target_root) {
     if (mkdir(target_root, 0755) == -1 && errno != EEXIST)
         return -1;
     return copy_directory(source_root, target_root, source_root, target_root);
+}
+
+static void relative_from_root(const char *root, const char *path, char *out, size_t out_sz) {
+    size_t root_len = strlen(root);
+    if (strncmp(root, path, root_len) == 0) {
+        const char *p = path + root_len;
+        if (*p == '/')
+            p++;
+        snprintf(out, out_sz, "%s", p);
+    } else {
+        snprintf(out, out_sz, "%s", path);
+    }
+}
+
+static void mirror_event_loop(const char *source_root, const char *target_root) {
+    int fd = inotify_init();
+    if (fd < 0)
+        _exit(1);
+
+    struct WatchEntry *watchers = NULL;
+    if (watch_directory_tree(fd, source_root, &watchers) != 0) {
+        watch_list_free(watchers);
+        close(fd);
+        _exit(1);
+    }
+
+    char buf[4096];
+    while (1) {
+        ssize_t len = read(fd, buf, sizeof(buf));
+        if (len < 0) {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+
+        ssize_t offset = 0;
+        while (offset < len) {
+            struct inotify_event *ev = (struct inotify_event *)(buf + offset);
+            const char *base = watch_list_find(watchers, ev->wd);
+            if (!base) {
+                offset += sizeof(struct inotify_event) + ev->len;
+                continue;
+            }
+
+            char src_path[4096];
+            if (ev->len && ev->name[0])
+                snprintf(src_path, sizeof(src_path), "%s/%s", base, ev->name);
+            else
+                snprintf(src_path, sizeof(src_path), "%s", base);
+
+            if (ev->mask & (IN_DELETE_SELF | IN_MOVE_SELF)) {
+                /* source removed; stop worker */
+                watch_list_free(watchers);
+                close(fd);
+                _exit(0);
+            }
+
+            char rel[4096];
+            relative_from_root(source_root, src_path, rel, sizeof(rel));
+            char dst_path[4096];
+            int n;
+            if (strlen(rel) > 0)
+                n = snprintf(dst_path, sizeof(dst_path), "%s/%s", target_root, rel);
+            else
+                n = snprintf(dst_path, sizeof(dst_path), "%s", target_root);
+            if (n < 0 || (size_t)n >= sizeof(dst_path)) {
+                offset += sizeof(struct inotify_event) + ev->len;
+                continue;
+            }
+
+            if (ev->mask & (IN_DELETE | IN_MOVED_FROM)) {
+                remove_path_recursive(dst_path);
+            } else {
+                char *slash = strrchr(dst_path, '/');
+                if (slash) {
+                    *slash = '\0';
+                    make_dir_recursive(dst_path, 0755);
+                    *slash = '/';
+                }
+
+                if (ev->mask & IN_ISDIR) {
+                    copy_directory(source_root, target_root, src_path, dst_path);
+                    watch_directory_tree(fd, src_path, &watchers);
+                } else {
+                    copy_entry(source_root, target_root, src_path, dst_path);
+                }
+            }
+
+            offset += sizeof(struct inotify_event) + ev->len;
+        }
+    }
+
+    watch_list_free(watchers);
+    close(fd);
+    _exit(1);
 }
 
 static int remove_if_missing(const char *source_root, const char *target_root,
@@ -658,10 +844,8 @@ void handle_add(const char *source, const char **targets, size_t target_count) {
                 _exit(1);
             }
 
-            /* simplified monitoring: pause until terminated */
             signal(SIGTERM, SIG_DFL);
-            while (1)
-                pause();
+            mirror_event_loop(src_real, tgt_real);
         }
 
         bt->worker_pid = pid;
