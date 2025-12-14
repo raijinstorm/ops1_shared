@@ -12,6 +12,32 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <sys/inotify.h>
+#include <stdbool.h>
+#include <limits.h>
+#define FNV_OFFSET 14695981039346656037UL
+#define FNV_PRIME 1099511628211UL
+
+static volatile sig_atomic_t exit_requested = 0;
+
+FILE * logger=NULL;
+static struct BackupSource *backups = NULL;
+static size_t  backup_count = 0;
+static size_t  backup_capacity = 0;
+
+/*Code from this website : https://benhoyt.com/writings/hash-table-in-c/#:~:text=%23define%20FNV_OFFSET%2014695981039346656037UL,hash%3B%0A%7D
+ where guy implemented his hashmap in c  */
+
+// Return 64-bit FNV-1a hash for key (NUL-terminated). See description:
+// https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function
+static uint64_t hash_key(const char* key) {
+    uint64_t hash = FNV_OFFSET;
+    for (const char* p = key; *p; p++) {
+        hash ^= (uint64_t)(unsigned char)(*p);
+        hash *= FNV_PRIME;
+    }
+    return hash;
+}
+
 
 struct BackupTarget {
     char *target_path;
@@ -27,13 +53,6 @@ struct BackupSource {
     size_t target_count;
     size_t target_capacity;
 };
-
-static volatile sig_atomic_t exit_requested = 0;
-
-FILE * logger=NULL;
-static struct BackupSource *backups = NULL;
-static size_t  backup_count = 0;
-static size_t  backup_capacity = 0;
 
 static void on_signal(int signo) {
     (void) signo;
@@ -111,8 +130,13 @@ static void msg_restore_finished() {
 
 /* ---------- List output ---------- */
 
-static void print_list_header() {
+static void print_active_list_header() {
     log_printf("\nActive backups:\n");
+    log_printf("------------------------------------------------------------\n");
+}
+
+static void print_inctive_list_header() {
+    log_printf("\nInctive backups:\n");
     log_printf("------------------------------------------------------------\n");
 }
 
@@ -125,17 +149,28 @@ static void print_list_empty() {
 }
 
 static void handle_list(void) {
-    if (backup_count == 0) {
+    if (backup_count == 0 ) {
         print_list_empty();
         return;
     }
 
-    print_list_header();
+    print_active_list_header();
 
     for (size_t i = 0; i < backup_count; i++) {
         struct BackupSource *b = &backups[i];
         for (size_t j = 0; j < b->target_count; j++) {
-            print_list_entry(b->source_path, b->targets[j].target_path);
+            if (b->targets[j].active==1)
+                print_list_entry(b->source_path, b->targets[j].target_path);
+        }
+    }
+
+    print_inctive_list_header();
+
+    for (size_t i = 0; i < backup_count; i++) {
+        struct BackupSource *b = &backups[i];
+        for (size_t j = 0; j < b->target_count; j++) {
+            if (b->targets[j].active==0)
+                print_list_entry(b->source_path, b->targets[j].target_path);
         }
     }
 }
@@ -163,6 +198,10 @@ static void err_restore_blocked(void) {
 
 static void err_file_open(const char *path) {
     log_printf("[ERROR] Cannot open file: %s\n", path);
+}
+
+static void err_directory_does_not_exist(const char *path) {
+    log_printf("[ERROR] Cannot find directory: %s\n", path);
 }
 
 static void err_path_inside(const char *src, const char *target) {
@@ -268,8 +307,12 @@ static int backup_exists(const char *source, const char *target) {
             continue;
 
         for (size_t j = 0; j < b->target_count; j++) {
-            if (strcmp(b->targets[j].target_path, target) == 0)
+            if (strcmp(b->targets[j].target_path, target) == 0) {
+                if (b->targets[j].active==0) {
+                    return 2;
+                }
                 return 1;
+            }
         }
     }
     return 0;
@@ -573,15 +616,27 @@ static void mirror_event_loop(const char *source_root, const char *target_root) 
 
     char buf[4096];
     while (1) {
+        if (exit_requested>0) {
+            watch_list_free(watchers);
+            close(fd);
+            exit(0);
+        }
         ssize_t len = read(fd, buf, sizeof(buf));
         if (len < 0) {
-            if (errno == EINTR)
+            if (errno == EINTR) {
+                errno=0;
                 continue;
+            }
             break;
         }
 
         ssize_t offset = 0;
         while (offset < len) {
+            if (exit_requested>0) {
+                watch_list_free(watchers);
+                close(fd);
+                exit(0);
+            }
             struct inotify_event *ev = (struct inotify_event *)(buf + offset);
             const char *base = watch_list_find(watchers, ev->wd);
             if (!base) {
@@ -701,14 +756,13 @@ static unsigned long file_hash(const char *path) {
     int fd = open(path, O_RDONLY);
     if (fd < 0)
         return 0;
-    unsigned long hash = 1469598103934665603ULL;
-    unsigned long prime = 1099511628211ULL;
+    unsigned long hash = 0;
     char buf[4096];
     ssize_t r;
     while ((r = read(fd, buf, sizeof(buf))) > 0) {
         for (ssize_t i = 0; i < r; i++) {
-            hash ^= (unsigned char)buf[i];
-            hash *= prime;
+            hash += (long)hash_key(buf);
+            hash%=LONG_MAX;
         }
     }
     close(fd);
@@ -767,6 +821,12 @@ void handle_add(const char *source, const char **targets, size_t target_count) {
         return;
     }
 
+    struct stat temp_st;
+    if (stat(src_real, &temp_st) != 0 || !S_ISDIR(temp_st.st_mode)) {
+        err_directory_does_not_exist(src_real);
+        return;
+    }
+
     struct BackupSource *bs = find_backup(src_real);
     if (!bs) {
         ensure_backup_capacity();
@@ -790,45 +850,69 @@ void handle_add(const char *source, const char **targets, size_t target_count) {
             continue;
         }
 
-        if (backup_exists(src_real, tgt_real)) {
+        int backup_state=backup_exists(src_real, tgt_real);
+        struct BackupTarget *bt=NULL;
+        if (backup_state == 1) {
             err_backup_exists(src_real, tgt_real);
             continue;
         }
+        else if (backup_state == 2) { //backup existed but was ended
 
-        struct stat st;
-        if (stat(tgt_real, &st) == -1) {
-            if (errno == ENOENT) {
-                if (make_dir_recursive(tgt_real, 0755) == -1) {
-                    perror("mkdir");
+            char tgt_abs[PATH_MAX];
+            if (canonical_path(targets[i], tgt_abs, sizeof(tgt_abs)) != 0) {
+                err_file_open(targets[i]);
+                continue;
+            }
+
+            for (size_t j = 0; j < bs->target_count; j++) {
+                if (strcmp(bs->targets[j].target_path, tgt_abs) == 0) {
+                    bt = &bs->targets[j];
+                    bs->targets[j].active = 1;
+                    break;
+                }
+            }
+
+            if (bt==NULL) {
+                fprintf(stderr,"[DEBUG] Error");
+            }
+        }
+        else if (backup_state == 0)
+        {
+            struct stat st;
+            if (stat(tgt_real, &st) == -1) {
+                if (errno == ENOENT) {
+                    if (make_dir_recursive(tgt_real, 0755) == -1) {
+                        perror("mkdir");
+                        continue;
+                    }
+                }
+            } else {
+                if (!S_ISDIR(st.st_mode)) {
+                    err_target_not_empty(tgt_real);
+                    continue;
+                }
+                int empty = directory_empty(tgt_real);
+                if (empty == 0) {
+                    err_target_not_empty(tgt_real);
+                    continue;
+                } else if (empty < 0) {
+                    err_file_open(tgt_real);
                     continue;
                 }
             }
-        } else {
-            if (!S_ISDIR(st.st_mode)) {
-                err_target_not_empty(tgt_real);
-                continue;
-            }
-            int empty = directory_empty(tgt_real);
-            if (empty == 0) {
-                err_target_not_empty(tgt_real);
-                continue;
-            } else if (empty < 0) {
-                err_file_open(tgt_real);
-                continue;
-            }
-        }
 
-        /* grow target array */
-        if (bs->target_count == bs->target_capacity) {
-            bs->target_capacity = bs->target_capacity ? bs->target_capacity * 2 : 2;
-            bs->targets = xrealloc(bs->targets,
-                                    bs->target_capacity * sizeof(*bs->targets));
-        }
+            /* grow target array */
+            if (bs->target_count == bs->target_capacity) {
+                bs->target_capacity = bs->target_capacity ? bs->target_capacity * 2 : 2;
+                bs->targets = xrealloc(bs->targets,
+                                        bs->target_capacity * sizeof(*bs->targets));
+            }
 
-        struct BackupTarget *bt = &bs->targets[bs->target_count++];
-        bt->target_path = xstrdup(tgt_real);
-        bt->active = 1;
-        bt->inotify_fd = -1;
+            bt = &bs->targets[bs->target_count++];
+            bt->target_path = xstrdup(tgt_real);
+            bt->active = 1;
+            bt->inotify_fd = -1;
+        }
 
         pid_t pid = fork();
         if (pid < 0) {
@@ -913,11 +997,15 @@ void handle_restore(const char *source, const char *target) {
 static void startup_message() {
     fprintf(stdout,"Before we start: would you like to log everything"
                     "into .log file.\nIf yes type it's path else just click ENTER:\n");
-    char *buffer;
-    size_t buffer_size;
+    char *buffer=NULL;
+    size_t buffer_size=0;
     getline(&buffer, &buffer_size, stdin);
     if (strlen(buffer) == 1 && buffer[0] == '\n') {
         printf("No log file specified. Continue without logging.");
+        if (buffer) {
+            free(buffer);
+            buffer = NULL;
+        }
         return;
     }
     buffer[strlen(buffer)-1]='\0';
@@ -926,54 +1014,100 @@ static void startup_message() {
     if (logger == NULL) {
         err_file_open(buffer);
         free(buffer);
+        buffer = NULL;
         exit(1);
     }
 
     free(buffer);
+    buffer = NULL;
 }
 
-static size_t parse_command(char *line, char **argv, size_t max_args) {
+static size_t arg_length(const char *p)
+{
+    size_t len = 0;
+    bool in_single = false, in_double = false;
+
+    while (*p) {
+        if (!in_double && *p == '\'') {
+            in_single = !in_single;
+            p++;
+            continue;
+        }
+        if (!in_single && *p == '"') {
+            in_double = !in_double;
+            p++;
+            continue;
+        }
+        if (!in_single && !in_double && is_separator(*p))
+            break;
+
+        if (*p == '\\' && !in_single && p[1]) {
+            p++;
+        }
+
+        len++;
+        p++;
+    }
+    return len;
+}
+
+size_t parse_command(const char *line, char **argv, size_t max_args)
+{
     size_t argc = 0;
-    char *p = line;
+    const char *p = line;
+
     while (*p && argc < max_args) {
         while (*p && is_separator(*p))
             p++;
+
         if (!*p)
             break;
 
-        char *start = p;
-        char quote = 0;
-        char *out = p;
+        size_t len = arg_length(p);
+        char *arg = malloc(len + 1);
+        if (!arg)
+            break;
+
+        size_t i = 0;
+        bool in_single = false, in_double = false;
+
         while (*p) {
-            if (quote == 0 && (*p == '"' || *p == '\'')) {
-                quote = *p;
+            if (!in_double && *p == '\'') {
+                in_single = !in_single;
                 p++;
                 continue;
             }
-            if (quote && *p == quote) {
-                quote = 0;
+            if (!in_single && *p == '"') {
+                in_double = !in_double;
                 p++;
                 continue;
             }
-            if (!quote && is_separator(*p))
+            if (!in_single && !in_double && is_separator(*p))
                 break;
-            if (*p == '\\' && p[1] != '\0') {
-                *out++ = p[1];
-                p += 2;
-                continue;
+
+            if (*p == '\\' && !in_single && p[1]) {
+                p++;
             }
-            *out++ = *p++;
+
+            arg[i++] = *p++;
         }
-        *out = '\0';
-        argv[argc++] = start;
-        if (*p)
+
+        arg[i] = '\0';
+        argv[argc++] = arg;
+
+        while (*p && is_separator(*p))
             p++;
     }
+
+    argv[argc] = NULL;
     return argc;
 }
 
 static void dispatch_command(char *line) {
     char *argv[64];          // Hardcoded 64 since this is enough for the project
+    for (int i=0;i<64;i++) {
+        argv[i]=NULL;
+    }
     size_t argc = parse_command(line, argv, 64);
 
     if (argc == 0) {
@@ -1026,6 +1160,12 @@ static void dispatch_command(char *line) {
     else {
         err_unknown_command();
     }
+    for (int i=0;i<(int)argc;i++) {
+        if (argv[i]!=NULL) {
+            free(argv[i]);
+            argv[i] = NULL;
+        }
+    }
 }
 
 
@@ -1066,6 +1206,7 @@ int main(void) {
     }
 
     free(buffer);
+    buffer=NULL;
     cleanup();
     return 0;
 }

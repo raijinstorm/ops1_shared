@@ -7,4 +7,4 @@
 
 [OK] Backup started for source: /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/from
      -> Target added: /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/to
-[OK] Backup stopped: /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/from -> /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/to
+[ERROR] Backup already exists: /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/from -> /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/to
