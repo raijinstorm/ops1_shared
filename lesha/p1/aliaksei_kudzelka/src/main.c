@@ -856,7 +856,7 @@ void handle_add(const char *source, const char **targets, size_t target_count) {
             err_backup_exists(src_real, tgt_real);
             continue;
         }
-        else if (backup_state == 2) { //backup existed but was ended
+        else if (backup_state == 2) { // backup existed but was ended
 
             char tgt_abs[PATH_MAX];
             if (canonical_path(targets[i], tgt_abs, sizeof(tgt_abs)) != 0) {

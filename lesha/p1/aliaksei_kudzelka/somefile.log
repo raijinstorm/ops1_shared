@@ -7,4 +7,19 @@
 
 [OK] Backup started for source: /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/from
      -> Target added: /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/to
-[ERROR] Backup already exists: /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/from -> /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/to
+[OK] Backup stopped: /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/from -> /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/to
+[INFO] Restoring backup:
+       Source : /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/from
+       Backup : /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/to
+[OK] Restore completed successfully.
+[INFO] Restoring backup:
+       Source : /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/from
+       Backup : /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/to
+[OK] Restore completed successfully.
+[OK] Backup started for source: /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/to
+[ERROR] Cannot create backup inside source. Source: /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/to Target: /home/aleksejkudelka4/OPS/nagibator228/ops1_shared/lesha/p1/aliaksei_kudzelka/to/to
+
+Shutting down...
+Cleaning up resources and terminating child processes.
+Goodbye.
+
