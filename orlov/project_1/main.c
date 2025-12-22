@@ -28,7 +28,7 @@ int debug_info = 0;
 static void log_info(const char *fmt, ...) {
   if (!debug_info)
     return;
-  va_list ap; //create a pointer to go through a list of optional variables.
+  va_list ap; // create a pointer to go through a list of optional variables.
   va_start(ap, fmt);
   printf("[INFO] ");
   vprintf(fmt, ap); // use this print to embed arguments into string
@@ -52,12 +52,12 @@ struct Backup {
 };
 
 struct Watch {
-  int wd; //inotify watch descriptor
-  char path[PATH_MAX]; //absolute path
+  int wd;              // inotify watch descriptor
+  char path[PATH_MAX]; // absolute path
 };
 
 struct WatchMap {
-  struct Watch list[MAX_WATCHES];  //watch map is needed to store multiple
+  struct Watch list[MAX_WATCHES]; // watch map is needed to store multiple
   int count;
 };
 
@@ -65,7 +65,10 @@ static struct Backup backups[MAX_BACKUPS];
 static int backup_count = 0;
 static volatile sig_atomic_t stop_flag = 0;
 
-static void on_term(int sig) { (void)sig; stop_flag = 1; }
+static void on_term(int sig) {
+  (void)sig;
+  stop_flag = 1;
+}
 static void free_args(char **argv, int argc);
 
 static void usage(void) {
@@ -109,7 +112,9 @@ static int ensure_dir(const char *path) {
   strncpy(tmp, path, sizeof(tmp));
   tmp[sizeof(tmp) - 1] = '\0';
 
-  char *slash = strrchr(tmp, '/'); //Finds the last slash in the path to separate the current directory from its paren
+  char *slash =
+      strrchr(tmp, '/'); // Finds the last slash in the path to separate the
+                         // current directory from its paren
   if (slash && slash != tmp) {
     *slash = '\0';
     if (ensure_dir(tmp) < 0) {
@@ -127,8 +132,8 @@ static int ensure_dir(const char *path) {
   return 0;
 }
 
-//wrapper around ensure_dir. Ensure dir would not work correctly if we path a file to it, so we separate
-//parent dirs and path them to ensure_dir
+// wrapper around ensure_dir. Ensure dir would not work correctly if we path a
+// file to it, so we separate parent dirs and path them to ensure_dir
 static int ensure_parent_dirs(const char *path) {
   log_info("Ensuring parent directories for: %s", path);
   char tmp[PATH_MAX];
@@ -151,8 +156,8 @@ static int is_empty_dir(const char *path) {
     log_error("opendir failed for %s: %s", path, strerror(errno));
     return -1;
   }
-  struct dirent *e; //declares a pointer to a directory entry structure
-  while ((e = readdir(dir)) != NULL) { //iterate through each entry inside dir
+  struct dirent *e; // declares a pointer to a directory entry structure
+  while ((e = readdir(dir)) != NULL) { // iterate through each entry inside dir
     if (strcmp(e->d_name, ".") != 0 && strcmp(e->d_name, "..") != 0) {
       closedir(dir);
       log_info("Directory not empty: %s", path);
@@ -186,10 +191,12 @@ static int copy_file(const char *src, const char *dst, mode_t mode) {
   char buf[4096];
   ssize_t r;
 
-  //reads the source file in 4KB chunks until the end of the file is reached
+  // reads the source file in 4KB chunks until the end of the file is reached
   while ((r = read(in_fd, buf, sizeof(buf))) > 0) {
     ssize_t off = 0;
-    while (off < r) { //ensures all bytes read in the current chunk are actually written
+    while (
+        off <
+        r) { // ensures all bytes read in the current chunk are actually written
       ssize_t w = write(out_fd, buf + off, r - off);
       if (w < 0) {
         log_error("write failed for %s: %s", dst, strerror(errno));
@@ -217,7 +224,7 @@ static int copy_file(const char *src, const char *dst, mode_t mode) {
   return 0;
 }
 
-//overwriting existing symlinks , clean before copying
+// overwriting existing symlinks , clean before copying
 static int unlink_if_exists(const char *path) {
   log_info("Unlinking path if exists: %s", path);
   if (unlink(path) == 0) {
@@ -236,20 +243,26 @@ static int copy_symlink(const char *src, const char *dst, const char *from_root,
                         const char *to_root) {
   log_info("Copying symlink %s -> %s", src, dst);
   char link_target[PATH_MAX];
-  ssize_t len = readlink(src, link_target, sizeof(link_target) - 1); // find out where the existing symlink at src is actually pointing.
+  ssize_t len =
+      readlink(src, link_target,
+               sizeof(link_target) - 1); // find out where the existing symlink
+                                         // at src is actually pointing.
   if (len < 0) {
     log_error("readlink failed for %s: %s", src, strerror(errno));
     return -1;
   }
-  link_target[len] = '\0'; //readlink does not append a null byte
+  link_target[len] = '\0'; // readlink does not append a null byte
 
-  //If a symbolic link points to a file inside the source directory using an absolute path,
-  //we fix the link in the target to point to the new backup version
-  //Otherwise, the link is copied exactly as it is.
+  // If a symbolic link points to a file inside the source directory using an
+  // absolute path, we fix the link in the target to point to the new backup
+  // version Otherwise, the link is copied exactly as it is.
   char adjusted[PATH_MAX];
-  if (link_target[0] == '/' && path_is_prefix(from_root, link_target)) { //checks if the link is an absolute path and is in root
+  if (link_target[0] == '/' &&
+      path_is_prefix(from_root, link_target)) { // checks if the link is an
+                                                // absolute path and is in root
     snprintf(adjusted, sizeof(adjusted), "%s%s", to_root,
-    link_target + strlen(from_root)); //use pointer arithm to skip from_root
+             link_target +
+                 strlen(from_root)); // use pointer arithm to skip from_root
   } else {
     strncpy(adjusted, link_target, sizeof(adjusted));
     adjusted[sizeof(adjusted) - 1] = '\0';
@@ -272,7 +285,7 @@ static int copy_symlink(const char *src, const char *dst, const char *from_root,
   return 0;
 }
 
-//basically works the same as rm -rf
+// basically works the same as rm -rf
 static int remove_path(const char *path) {
   log_info("Removing path: %s", path);
   struct stat st;
@@ -296,8 +309,9 @@ static int remove_path(const char *path) {
         continue;
       }
       char sub_src[PATH_MAX];
-      snprintf(sub_src, sizeof(sub_src), "%s/%s", path, e->d_name); //construct full path
-      if (remove_path(sub_src) < 0) { //recursive call
+      snprintf(sub_src, sizeof(sub_src), "%s/%s", path,
+               e->d_name);            // construct full path
+      if (remove_path(sub_src) < 0) { // recursive call
         closedir(dir);
         return -1;
       }
@@ -307,8 +321,7 @@ static int remove_path(const char *path) {
       log_error("rmdir failed for %s: %s", path, strerror(errno));
       return -1;
     }
-  }
-  else {
+  } else {
     if (unlink(path) < 0) {
       log_error("unlink failed for %s: %s", path, strerror(errno));
       return -1;
@@ -361,7 +374,8 @@ static int copy_dir(const char *src, const char *dst, const char *from_root,
   return 0;
 }
 
-//universal copy function which call corresponding copy func for each type of entry
+// universal copy function which call corresponding copy func for each type of
+// entry
 static int copy_entry(const char *src, const char *dst, const char *from_root,
                       const char *to_root) {
   log_info("Copying entry %s -> %s", src, dst);
@@ -510,7 +524,8 @@ static void watch_map_remove(struct WatchMap *map, int wd) {
   }
 }
 
-//convert ID number (watch descriptor) back into a string path after reading event from inotify
+// convert ID number (watch descriptor) back into a string path after reading
+// event from inotify
 static struct Watch *watch_map_find(struct WatchMap *map, int wd) {
   log_info("Looking up watch wd=%d", wd);
   for (int i = 0; i < map->count; i++) {
@@ -521,7 +536,7 @@ static struct Watch *watch_map_find(struct WatchMap *map, int wd) {
   return NULL;
 }
 
-//basic add of inotify entry to monitor specific function
+// basic add of inotify entry to monitor specific function
 static int add_watch_entry(int fd, struct WatchMap *map, const char *path,
                            uint32_t mask) {
   log_info("Adding watch for %s", path);
@@ -542,7 +557,8 @@ static int add_watch_entry(int fd, struct WatchMap *map, const char *path,
   return 0;
 }
 
-//opens the directory, loops through its contents, and calls itself for every subdirectory
+// opens the directory, loops through its contents, and calls itself for every
+// subdirectory
 static int add_watch_recursive(int fd, struct WatchMap *map, const char *path,
                                uint32_t mask) {
   log_info("Recursively adding watch for %s", path);
@@ -580,7 +596,8 @@ static int add_watch_recursive(int fd, struct WatchMap *map, const char *path,
   return 0;
 }
 
-//ff a directory in the source is deleted or moved we stop watching it and all its subfolders
+// ff a directory in the source is deleted or moved we stop watching it and all
+// its subfolders
 static void remove_watches_under(int fd, struct WatchMap *map,
                                  const char *path) {
   log_info("Removing watches under path %s", path);
@@ -597,7 +614,10 @@ static void remove_watches_under(int fd, struct WatchMap *map,
 }
 
 static volatile sig_atomic_t worker_stop = 0;
-static void worker_term(int sig) { (void)sig; worker_stop = 1; }
+static void worker_term(int sig) {
+  (void)sig;
+  worker_stop = 1;
+}
 
 static int run_worker(const char *source, const char *target) {
   log_info("Worker starting for %s -> %s", source, target);
@@ -630,7 +650,7 @@ static int run_worker(const char *source, const char *target) {
     return 1;
   }
 
-  //create mask to decide which operations should be tracked by inotify
+  // create mask to decide which operations should be tracked by inotify
   uint32_t mask = IN_CREATE | IN_MODIFY | IN_DELETE | IN_MOVED_FROM |
                   IN_MOVED_TO | IN_ATTRIB | IN_DELETE_SELF | IN_MOVE_SELF |
                   IN_CLOSE_WRITE;
@@ -655,7 +675,7 @@ static int run_worker(const char *source, const char *target) {
     }
     log_info("Read %zd bytes from inotify", len);
 
-    //process events one by one
+    // process events one by one
     ssize_t i = 0;
     while (i < len) {
       struct inotify_event *ev = (struct inotify_event *)&buffer[i];
@@ -666,20 +686,22 @@ static int run_worker(const char *source, const char *target) {
       }
 
       char src_path[PATH_MAX * 2];
-      if (ev->len > 0) { //check if event hapenned to file/dir inside monitored dir
+      if (ev->len >
+          0) { // check if event hapenned to file/dir inside monitored dir
         snprintf(src_path, sizeof(src_path), "%s/%s", w->path, ev->name);
-      } else {  // in case it happend to monitered dir itself
+      } else { // in case it happend to monitered dir itself
         strncpy(src_path, w->path, sizeof(src_path));
         src_path[sizeof(src_path) - 1] = '\0';
       }
 
-        //calc desination path
+      // calc desination path
       char dst_path[PATH_MAX];
       if (strcmp(src_path, source) == 0) {
         strncpy(dst_path, target, sizeof(dst_path));
       } else {
         const char *rel = src_path + strlen(source) + 1;
-        snprintf(dst_path, sizeof(dst_path), "%s/%s", target, rel); //concat target root folder and path from source
+        snprintf(dst_path, sizeof(dst_path), "%s/%s", target,
+                 rel); // concat target root folder and path from source
       }
       dst_path[sizeof(dst_path) - 1] = '\0';
 
@@ -697,35 +719,35 @@ static int run_worker(const char *source, const char *target) {
         break;
       }
 
-    if (ev->mask & (IN_DELETE | IN_MOVED_FROM)) {
-      if (ev->mask & IN_ISDIR) {
-        remove_watches_under(fd, map, src_path);
-      }
-      log_info("Removing %s -> %s due to delete/move", src_path, dst_path);
-      remove_path(dst_path);
-    } else if (ev->mask & (IN_CREATE | IN_MOVED_TO)) {
-      struct stat st;
-      if (lstat(src_path, &st) == 0 && (ev->mask & IN_ISDIR)) {
-        log_info("Directory created/moved at %s", src_path);
-        copy_dir(src_path, dst_path, source, target);
-        add_watch_recursive(fd, map, src_path, mask);
-      } else {
-        log_info("Entry created/moved at %s", src_path);
-        copy_entry(src_path, dst_path, source, target);
-      }
-    } else if (ev->mask & (IN_MODIFY | IN_CLOSE_WRITE | IN_ATTRIB)) {
-      struct stat st;
-      if (lstat(src_path, &st) == 0) {
-        if (S_ISDIR(st.st_mode)) {
-          log_info("Directory attributes_changed %s", src_path);
-          chmod(dst_path, st.st_mode & 0777);
+      if (ev->mask & (IN_DELETE | IN_MOVED_FROM)) {
+        if (ev->mask & IN_ISDIR) {
+          remove_watches_under(fd, map, src_path);
+        }
+        log_info("Removing %s -> %s due to delete/move", src_path, dst_path);
+        remove_path(dst_path);
+      } else if (ev->mask & (IN_CREATE | IN_MOVED_TO)) {
+        struct stat st;
+        if (lstat(src_path, &st) == 0 && (ev->mask & IN_ISDIR)) {
+          log_info("Directory created/moved at %s", src_path);
+          copy_dir(src_path, dst_path, source, target);
+          add_watch_recursive(fd, map, src_path, mask);
         } else {
-          log_info("File modified/attrib %s", src_path);
+          log_info("Entry created/moved at %s", src_path);
           copy_entry(src_path, dst_path, source, target);
         }
+      } else if (ev->mask & (IN_MODIFY | IN_CLOSE_WRITE | IN_ATTRIB)) {
+        struct stat st;
+        if (lstat(src_path, &st) == 0) {
+          if (S_ISDIR(st.st_mode)) {
+            log_info("Directory attributes_changed %s", src_path);
+            chmod(dst_path, st.st_mode & 0777);
+          } else {
+            log_info("File modified/attrib %s", src_path);
+            copy_entry(src_path, dst_path, source, target);
+          }
+        }
       }
-    }
-        //move the pointer to the start of the next event in the buffer
+      // move the pointer to the start of the next event in the buffer
       i += sizeof(struct inotify_event) + ev->len;
     }
   }
@@ -758,8 +780,11 @@ static void reap_children(void) {
   while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
     for (int i = 0; i < backup_count; i++) {
       if (backups[i].pid == pid) {
-        backups[i] = backups[backup_count - 1]; // fill the blank space in the middle (after remove) with the last elem
-        backup_count--; //we "forget" that last element exists, it will be overwritte
+        backups[i] =
+            backups[backup_count - 1]; // fill the blank space in the middle
+                                       // (after remove) with the last elem
+        backup_count--; // we "forget" that last element exists, it will be
+                        // overwritte
         break;
       }
     }
@@ -775,7 +800,7 @@ static void stop_backup(const char *source, const char *target) {
   }
   kill(backups[idx].pid, SIGTERM);
   waitpid(backups[idx].pid, NULL, 0);
-  backups[idx] = backups[backup_count - 1]; //same logic as in function above
+  backups[idx] = backups[backup_count - 1]; // same logic as in function above
   backup_count--;
 }
 
