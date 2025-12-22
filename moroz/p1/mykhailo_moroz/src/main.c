@@ -14,19 +14,19 @@
 #include <time.h>
 #include <unistd.h>
 
-int copy_file(const char* src, const char* dst, mode_t mode);
-int copy_symplink_rewrite(const char* src_link, const char* dst_link, const char* src_real, const char* dst_real);
-int mkdir_p(const char* path, mode_t mode);
-int rm_tree(const char* path);
-int has_prefix_path(const char* s, const char* prefix);
-int copy_tree(const char* src_dir, const char* dst_dir, const char* src_real, const char* dst_real);
-
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
 
 #define MAX_ARGS 32
 #define PENDING_MAX 128
+
+int copy_file(const char* src, const char* dst, mode_t mode);
+int copy_symplink_rewrite(const char* src_link, const char* dst_link, const char* src_real, const char* dst_real);
+int mkdir_p(const char* path, mode_t mode);
+int rm_tree(const char* path);
+int has_prefix_path(const char* s, const char* prefix);
+int copy_tree(const char* src_dir, const char* dst_dir, const char* src_real, const char* dst_real);
 
 static volatile sig_atomic_t g_terminate = 0;
 static volatile sig_atomic_t g_got_sigchld = 0;
