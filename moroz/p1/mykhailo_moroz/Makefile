@@ -15,7 +15,8 @@ SOURCES=$(shell find src -type f -iname '*.c')
 OBJECTS=$(foreach x, $(basename $(SOURCES)), $(x).o)
 
 $(NAME): $(OBJECTS)
-	$(CC) $^ -o $@
+	$(CC) ${CFLAGS} $^ -o $@
+
 
 clean:
 	rm -f $(NAME) $(OBJECTS)
