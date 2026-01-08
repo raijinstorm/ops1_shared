@@ -51,9 +51,17 @@ void ms_sleep(unsigned int milli)
         ERR("nanosleep");
 }
 
+typedef struct Shared {
+    int* shelves;
+    pthread_mutex_t* shelf_mutexes;
+}Shared;
+
 typedef struct Worker {
+    Shared* shared;
     int id;
     pthread_t tid;
+    unsigned int seed;
+    int productsNum;
 }Worker;
 
 void readArgs(int argc, char* argv[], int* p, int*e) {
@@ -76,22 +84,65 @@ void* work(void* args) {
     Worker* worker = (Worker*) args;
     printf("Worker %d: Reporting for the night shift!\n", worker->id);
 
+    for (int i=0;i<10;i++) {
+        int product1 = (rand_r(&worker->seed))%worker->productsNum;
+        int product2 = (rand_r(&worker->seed))%worker->productsNum;
+        while (product1 == product2) {
+            product1 = (rand_r(&worker->seed))%worker->productsNum;
+        }
+        if (product1>product2) {
+            SWAP(product1, product2);
+        }
+
+        pthread_mutex_lock(&worker->shared->shelf_mutexes[product1]);
+        pthread_mutex_lock(&worker->shared->shelf_mutexes[product2]);
+        if (worker->shared->shelves[product1] > worker->shared->shelves[product2]) {
+            SWAP(worker->shared->shelves[product1], worker->shared->shelves[product2]);
+            ms_sleep(50);
+        }
+
+        pthread_mutex_unlock(&worker->shared->shelf_mutexes[product1]);
+        pthread_mutex_unlock(&worker->shared->shelf_mutexes[product2]);
+    }
+    ms_sleep(100);
+
     return NULL;
 }
 
 int main(int argc, char* argv[]) {
     int employeesNum, productsNum;
     readArgs(argc, argv, &productsNum,&employeesNum);
+    srand(time(NULL));
 
-    // int* shelves = calloc(sizeof(int), productsNum);
-    // pthread_mutex_t* shelves_mutex = calloc(sizeof(pthread_mutex_t), productsNum);
+    int* shelves = malloc(productsNum * sizeof(int));
+    if (!shelves) {
+        ERR("malloc");
+    }
+    pthread_mutex_t* shelf_mutexes = malloc(productsNum * sizeof(pthread_mutex_t));
+    if (!shelf_mutexes) {
+        ERR("malloc");
+    }
+    for (int i=0;i<productsNum;i++) {
+        shelves[i] = i+1;
+        if (pthread_mutex_init(&shelf_mutexes[i], NULL)) {
+            ERR("pthread_mutex_init");
+        }
+    }
+    Shared shared;
+    shared.shelves = shelves;
+    shared.shelf_mutexes = shelf_mutexes;
+    shuffle(shelves, productsNum);
 
     Worker* workers = malloc(sizeof(Worker)*employeesNum);
     if (workers==NULL) {
         ERR("malloc");
     }
+    print_shop(shelves, productsNum);
     for (int i=0;i<employeesNum;i++) {
+        workers[i].shared = &shared;
         workers[i].id = i;
+        workers[i].productsNum = productsNum;
+        workers[i].seed = rand();
         if (pthread_create(&workers[i].tid, NULL, work, &workers[i])) {
             ERR("pthread_create");
         }
@@ -102,5 +153,13 @@ int main(int argc, char* argv[]) {
             ERR("pthread_join");
         }
     }
+    print_shop(shelves, productsNum);
+
+    for (int i=0;i<productsNum;i++) {
+        if (pthread_mutex_destroy(&shelf_mutexes[i])) {
+            ERR("pthread_mutex_destroy");
+        }
+    }
+    free(shelves);
     free(workers);
 }
