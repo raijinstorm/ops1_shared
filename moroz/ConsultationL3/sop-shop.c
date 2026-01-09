@@ -56,7 +56,7 @@ typedef struct Shared {
     pthread_mutex_t* shelf_mutexes;
     int flag;
     pthread_mutex_t flag_mutex;
-    sigset_t mask;
+    int productsNum;
 }Shared;
 
 typedef struct Worker {
@@ -64,8 +64,14 @@ typedef struct Worker {
     int id;
     pthread_t tid;
     unsigned int seed;
-    int productsNum;
 }Worker;
+
+typedef struct SigArgs {
+    sigset_t mask;
+    unsigned int sig_seed;
+    Worker* workers;
+    int workersNum;
+}SigArgs;
 
 void readArgs(int argc, char* argv[], int* p, int*e) {
     if (argc!=3) {
@@ -83,6 +89,11 @@ void readArgs(int argc, char* argv[], int* p, int*e) {
     *e = b;
 }
 
+void cleanup(void* args) {
+    pthread_mutex_t* mutex_arg = (pthread_mutex_t*)args;
+    pthread_mutex_lock(mutex_arg);
+}
+
 void* work(void* args) {
     Worker* worker = (Worker*) args;
     printf("Worker %d: Reporting for the night shift!\n", worker->id);
@@ -94,10 +105,10 @@ void* work(void* args) {
             break;
         }
         pthread_mutex_unlock(&worker->shared->flag_mutex);
-        int product1 = (rand_r(&worker->seed))%worker->productsNum;
-        int product2 = (rand_r(&worker->seed))%worker->productsNum;
+        int product1 = (rand_r(&worker->seed))%worker->shared->productsNum;
+        int product2 = (rand_r(&worker->seed))%worker->shared->productsNum;
         while (product1 == product2) {
-            product1 = (rand_r(&worker->seed))%worker->productsNum;
+            product1 = (rand_r(&worker->seed))%worker->shared->productsNum;
         }
         ms_sleep(100);
         if (product1>product2) {
@@ -105,7 +116,9 @@ void* work(void* args) {
         }
 
         pthread_mutex_lock(&worker->shared->shelf_mutexes[product1]);
+        pthread_cleanup_push(cleanup, &worker->shared->shelf_mutexes[product1]);
         pthread_mutex_lock(&worker->shared->shelf_mutexes[product2]);
+        pthread_cleanup_push(cleanup, &worker->shared->shelf_mutexes[product2]);
         if (worker->shared->shelves[product1] > worker->shared->shelves[product2]) {
             SWAP(worker->shared->shelves[product1], worker->shared->shelves[product2]);
             ms_sleep(50);
@@ -113,31 +126,85 @@ void* work(void* args) {
 
         pthread_mutex_unlock(&worker->shared->shelf_mutexes[product1]);
         pthread_mutex_unlock(&worker->shared->shelf_mutexes[product2]);
+        pthread_cleanup_pop(0);
+        pthread_cleanup_pop(0);
     }
 
     return NULL;
 }
 
 void* sig_handler(void* args) {
-    Shared* shared = (Shared*) args;
+    SigArgs* sig_args = (SigArgs*) args;
+    int active_workers = sig_args->workersNum;
+    int* active_indices = malloc(sizeof(int)*sig_args->workersNum);
+    if (!active_indices) {
+        ERR("malloc");
+    }
+    for (int i = 0;i<active_workers;i++) {
+        active_indices[i] = i;
+    }
+
     while (1) {
         int sig;
-        if (sigwait(&shared->mask,&sig)) {
+        if (sigwait(&sig_args->mask,&sig)) {
             ERR("sigwait");
         }
         if (sig == SIGINT) {
-            pthread_mutex_lock(&shared->flag_mutex);
-            shared->flag = 1;
-            pthread_mutex_unlock(&shared->flag_mutex);
+            pthread_mutex_lock(&sig_args->workers->shared->flag_mutex);
+            sig_args->workers->shared->flag = 1;
+            pthread_mutex_unlock(&sig_args->workers->shared->flag_mutex);
             break;
         }
+        if (sig == SIGALRM) {
+            for (int i=0;i<sig_args->workers->shared->productsNum;i++) {
+                pthread_mutex_lock(&sig_args->workers->shared->shelf_mutexes[i]);
+            }
+            print_shop(sig_args->workers->shared->shelves, sig_args->workers->shared->productsNum);
+            for (int i=0;i<sig_args->workers->shared->productsNum;i++) {
+                pthread_mutex_unlock(&sig_args->workers->shared->shelf_mutexes[i]);
+            }
+            alarm(1);
+        }
+        else if (sig == SIGUSR1) {
+            for (int i=0;i<sig_args->workers->shared->productsNum;i++) {
+                pthread_mutex_lock(&sig_args->workers->shared->shelf_mutexes[i]);
+            }
+            shuffle(sig_args->workers->shared->shelves, sig_args->workers->shared->productsNum);
+            for (int i=0;i<sig_args->workers->shared->productsNum;i++) {
+                pthread_mutex_unlock(&sig_args->workers->shared->shelf_mutexes[i]);
+            }
+        }
+        else if (sig == SIGUSR2) {
+            if (active_workers>0) {
+                int id = rand_r(&sig_args->sig_seed)%(active_workers);
+                int empIdx = active_indices[id];
+
+                printf("Cancelling worker %d (SIGUSR2)\n", empIdx);
+                pthread_cancel(sig_args->workers[empIdx].tid);
+                
+                active_indices[id] = active_indices[active_workers-1];
+                active_workers--;
+                if (active_workers==0) {
+                    pthread_mutex_lock(&sig_args->workers->shared->flag_mutex);
+                    sig_args->workers->shared->flag = 1;
+                    pthread_mutex_unlock(&sig_args->workers->shared->flag_mutex);
+                    break;
+                }
+            }
+        }
     }
+
+    free(active_indices);
+    return NULL;
 }
 
 int main(int argc, char* argv[]) {
     sigset_t newMask;
     sigemptyset(&newMask);
     sigaddset(&newMask, SIGINT);
+    sigaddset(&newMask, SIGALRM);
+    sigaddset(&newMask, SIGUSR1);
+    sigaddset(&newMask, SIGUSR2);
     if (pthread_sigmask(SIG_BLOCK, &newMask, NULL))
         ERR("SIG_BLOCK error");
 
@@ -164,7 +231,7 @@ int main(int argc, char* argv[]) {
     shared.shelf_mutexes = shelf_mutexes;
     shared.flag = 0;
     pthread_mutex_init(&shared.flag_mutex, NULL);
-    shared.mask = newMask;
+    shared.productsNum = productsNum;
     shuffle(shelves, productsNum);
 
     Worker* workers = malloc(sizeof(Worker)*employeesNum);
@@ -175,7 +242,6 @@ int main(int argc, char* argv[]) {
     for (int i=0;i<employeesNum;i++) {
         workers[i].shared = &shared;
         workers[i].id = i;
-        workers[i].productsNum = productsNum;
         workers[i].seed = rand();
         if (pthread_create(&workers[i].tid, NULL, work, &workers[i])) {
             ERR("pthread_create");
@@ -183,7 +249,12 @@ int main(int argc, char* argv[]) {
     }
 
     pthread_t sigTid;
-    if (pthread_create(&sigTid, NULL, sig_handler, &shared)) {
+    SigArgs sig_args;
+    sig_args.workers = workers;
+    sig_args.sig_seed = rand();
+    sig_args.mask = newMask;
+    sig_args.workersNum = employeesNum;
+    if (pthread_create(&sigTid, NULL, sig_handler, &sig_args)) {
         ERR("pthread_create");
     }
 
