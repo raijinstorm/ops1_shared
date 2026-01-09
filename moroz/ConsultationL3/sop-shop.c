@@ -54,6 +54,9 @@ void ms_sleep(unsigned int milli)
 typedef struct Shared {
     int* shelves;
     pthread_mutex_t* shelf_mutexes;
+    int flag;
+    pthread_mutex_t flag_mutex;
+    sigset_t mask;
 }Shared;
 
 typedef struct Worker {
@@ -84,12 +87,19 @@ void* work(void* args) {
     Worker* worker = (Worker*) args;
     printf("Worker %d: Reporting for the night shift!\n", worker->id);
 
-    for (int i=0;i<10;i++) {
+    for (;;) {
+        pthread_mutex_lock(&worker->shared->flag_mutex);
+        if (worker->shared->flag) {
+            pthread_mutex_unlock(&worker->shared->flag_mutex);
+            break;
+        }
+        pthread_mutex_unlock(&worker->shared->flag_mutex);
         int product1 = (rand_r(&worker->seed))%worker->productsNum;
         int product2 = (rand_r(&worker->seed))%worker->productsNum;
         while (product1 == product2) {
             product1 = (rand_r(&worker->seed))%worker->productsNum;
         }
+        ms_sleep(100);
         if (product1>product2) {
             SWAP(product1, product2);
         }
@@ -104,12 +114,33 @@ void* work(void* args) {
         pthread_mutex_unlock(&worker->shared->shelf_mutexes[product1]);
         pthread_mutex_unlock(&worker->shared->shelf_mutexes[product2]);
     }
-    ms_sleep(100);
 
     return NULL;
 }
 
+void* sig_handler(void* args) {
+    Shared* shared = (Shared*) args;
+    while (1) {
+        int sig;
+        if (sigwait(&shared->mask,&sig)) {
+            ERR("sigwait");
+        }
+        if (sig == SIGINT) {
+            pthread_mutex_lock(&shared->flag_mutex);
+            shared->flag = 1;
+            pthread_mutex_unlock(&shared->flag_mutex);
+            break;
+        }
+    }
+}
+
 int main(int argc, char* argv[]) {
+    sigset_t newMask;
+    sigemptyset(&newMask);
+    sigaddset(&newMask, SIGINT);
+    if (pthread_sigmask(SIG_BLOCK, &newMask, NULL))
+        ERR("SIG_BLOCK error");
+
     int employeesNum, productsNum;
     readArgs(argc, argv, &productsNum,&employeesNum);
     srand(time(NULL));
@@ -131,6 +162,9 @@ int main(int argc, char* argv[]) {
     Shared shared;
     shared.shelves = shelves;
     shared.shelf_mutexes = shelf_mutexes;
+    shared.flag = 0;
+    pthread_mutex_init(&shared.flag_mutex, NULL);
+    shared.mask = newMask;
     shuffle(shelves, productsNum);
 
     Worker* workers = malloc(sizeof(Worker)*employeesNum);
@@ -148,10 +182,18 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    pthread_t sigTid;
+    if (pthread_create(&sigTid, NULL, sig_handler, &shared)) {
+        ERR("pthread_create");
+    }
+
     for (int i=0;i<employeesNum;i++) {
         if (pthread_join(workers[i].tid, NULL)) {
             ERR("pthread_join");
         }
+    }
+    if (pthread_join(sigTid, NULL)) {
+        ERR("pthread_join");
     }
     print_shop(shelves, productsNum);
 
@@ -160,6 +202,10 @@ int main(int argc, char* argv[]) {
             ERR("pthread_mutex_destroy");
         }
     }
+    if (pthread_mutex_destroy(&shared.flag_mutex)) {
+        ERR("pthread_mutex_destroy");
+    }
     free(shelves);
+    free(shelf_mutexes);
     free(workers);
 }
