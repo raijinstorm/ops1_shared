@@ -24,6 +24,8 @@ typedef struct Game {
     int gave_up[2];
     int num_regions;
     pthread_mutex_t game_mutex;
+    pthread_t player_tids[2];
+    pthread_mutex_t print_mutex;
 }Game;
 
 typedef struct Player{
@@ -39,7 +41,7 @@ int compare(const void* a, const void* b) {
 }
 
 void print(Game* game) {
-
+    pthread_mutex_lock(&game->print_mutex);
     for (int i=0;i<game->num_regions;i++) {
         region_t* region = &game->regions[i];
         printf("%d [%c] :", i, region->owner);
@@ -51,6 +53,7 @@ void print(Game* game) {
         }
         printf("\n");
     }
+    pthread_mutex_unlock(&game->print_mutex);
 }
 
 void* work(void* args) {
@@ -71,7 +74,7 @@ void* work(void* args) {
             lockIndexes[count++] = field->neighbors[i];
         }
 
-        qsort(lockIndexes, MAX_NEIGHBORS+1, sizeof(int), compare);
+        qsort(lockIndexes, count, sizeof(int), compare);
 
         for (int i=0;i<count;i++) {
             if (i > 0 && lockIndexes[i] == lockIndexes[i-1]) {
@@ -128,10 +131,79 @@ void* work(void* args) {
     return NULL;
 }
 
+void* signal_handler(void* args) {
+    Game* game = (Game*)args;
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGTERM);
+
+    unsigned int seed = rand();
+    int sig;
+    while (1) {
+        if (sigwait(&mask,&sig)) {
+            ERR("sigwait");
+        }
+
+        if (sig == SIGINT) {
+            int found_flag=0;
+            for (int i=0;i<game->num_regions*2;i++) {
+                int field_id = rand_r(&seed)%game->num_regions;
+
+                pthread_mutex_lock(&game->regions_mutex[field_id]);
+
+                char landlord = game->regions[field_id].owner;
+                if (landlord == 'A' || landlord == 'B') {
+                    game->regions[field_id].owner = '-';
+                    pthread_mutex_unlock(&game->regions_mutex[field_id]);
+
+                    pthread_mutex_lock(&game->game_mutex);
+                    if (landlord=='A') {
+                        game->points[0]--;
+                    }
+                    else if (landlord == 'B') {
+                        game->points[1]--;
+                    }
+                    pthread_mutex_unlock(&game->game_mutex);
+
+                    found_flag = 1;
+                }
+                else {
+                    pthread_mutex_unlock(&game->regions_mutex[field_id]);
+                }
+
+                if (found_flag) {
+                    break;
+                }
+            }
+
+            print(game);
+        }
+
+        else if (sig == SIGTERM) {
+            pthread_cancel(game->player_tids[0]);
+            pthread_cancel(game->player_tids[1]);
+
+            printf("Robin Hood wins!\n");
+            exit(EXIT_SUCCESS);
+        }
+    }
+
+    return NULL;
+}
+
 int main(int argc, char** argv) {
     if (argc!=2) {
         usage(argc, argv);
     }
+
+    sigset_t newMask;
+    sigemptyset(&newMask);
+    sigaddset(&newMask, SIGINT);
+    sigaddset(&newMask, SIGTERM);
+    if (pthread_sigmask(SIG_BLOCK, &newMask, NULL))
+        ERR("pthread_sigmask error");
+
     srand(time(NULL));
     int num_regions;
     region_t* regions = load_regions(argv[1], &num_regions);
@@ -148,6 +220,9 @@ int main(int argc, char** argv) {
     game.num_regions = num_regions;
     game.regions_mutex = malloc(sizeof(pthread_mutex_t) * game.num_regions);
     if (pthread_mutex_init(&game.game_mutex, NULL)) {
+        ERR("pthread_mutex_init");
+    }
+    if (pthread_mutex_init(&game.print_mutex, NULL)) {
         ERR("pthread_mutex_init");
     }
     game.gave_up[0] = 0;
@@ -173,12 +248,19 @@ int main(int argc, char** argv) {
     args_p2.id = 'B';
     args_p2.seed = rand();
 
-    if (pthread_create(&args_p1.tid, NULL, work, &args_p1)) {
+    pthread_t signalTid;
+    if (pthread_create(&signalTid, NULL, signal_handler, &game)) {
         ERR("pthread_create");
     }
-    if (pthread_create(&args_p2.tid, NULL, work, &args_p2)) {
+
+    if (pthread_create(&game.player_tids[0], NULL, work, &args_p1)) {
         ERR("pthread_create");
     }
+    args_p1.tid = game.player_tids[0];
+    if (pthread_create(&game.player_tids[1], NULL, work, &args_p2)) {
+        ERR("pthread_create");
+    }
+    args_p2.tid = game.player_tids[1];
 
     while (1) {
         ms_sleep(SHOW_MS);
@@ -188,7 +270,8 @@ int main(int argc, char** argv) {
         int any_given_up = (game.gave_up[0] || game.gave_up[1]);
         pthread_mutex_unlock(&game.game_mutex);
 
-        if (any_given_up) break;
+        if (any_given_up)
+            break;
     }
 
     if (pthread_join(args_p1.tid, NULL)) {
@@ -198,11 +281,15 @@ int main(int argc, char** argv) {
         ERR("pthread_join");
     }
 
+    pthread_cancel(signalTid);
+    pthread_join(signalTid, NULL);
+
     for (int i = 0; i < game.num_regions; i++) {
         pthread_mutex_destroy(&game.regions_mutex[i]);
     }
     free(game.regions_mutex);
     pthread_mutex_destroy(&game.game_mutex);
+    pthread_mutex_destroy(&game.print_mutex);
     free(regions);
 
     return 0;
