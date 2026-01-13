@@ -11,7 +11,7 @@ NAME=sop-lmap
 all: ${NAME}
 
 ${NAME}: ${NAME}.c
-	gcc $(CFLAGS) -o ${NAME} ${NAME}.c
+	gcc $(CFLAGS) -o ${NAME} ${NAME}.c -pthread -lm
 
 clean:
 	rm -f ${NAME}
