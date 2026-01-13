@@ -2,7 +2,7 @@ P2 # magic number
 5 4 # width height
 255 # maximum value
 # This is the end of the header
-42 170 42 42 127
-85 255 0 0 85
-170 127 0 127 0
-127 85 85 42 85
+255 255 170 0 170
+85 170 255 170 170
+170 85 255 170 170
+255 170 170 255 0

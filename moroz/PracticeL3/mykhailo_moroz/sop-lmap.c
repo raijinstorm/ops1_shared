@@ -6,14 +6,20 @@ void usage(int argc, char** argv)
     exit(EXIT_FAILURE);
 }
 
+typedef struct {
+    int next_test_idx;
+    int completed_tests;
+    int total_tests;
+    pthread_mutex_t mutex;
+} job_context_t;
+
 typedef struct Worker {
     pthread_t tid;
     unsigned int seed;
-    int start;
-    int end;
     int iterations;
     int bucket_count;
     int* res;
+    job_context_t* job;
 }Worker;
 
 void readArgs(int argc, char** argv, int* iterations, int* bucket_count, int* test_count, int* worker_count) {
@@ -33,13 +39,30 @@ void readArgs(int argc, char** argv, int* iterations, int* bucket_count, int* te
 
 void* work(void* args) {
     Worker* worker = (Worker*)args;
+    job_context_t* job = worker->job;
 
-    for (int i = worker->start; i<worker->end; i++) {
+    while (1) {
+        int thread_testId = -1;
+        pthread_mutex_lock(&job->mutex);
+        if (job->next_test_idx < job->total_tests) {
+            thread_testId = job->next_test_idx;
+            job->next_test_idx++;
+        }
+        pthread_mutex_unlock(&job->mutex);
+
+        if (thread_testId==-1) {
+            break;
+        }
         for (int j=0;j<worker->iterations;j++) {
             int bucketId = rand_r(&worker->seed)%worker->bucket_count;
-            worker->res[i*worker->bucket_count + bucketId] += 1;
+            worker->res[thread_testId*worker->bucket_count + bucketId] += 1;
         }
+
+        pthread_mutex_lock(&job->mutex);
+        job->completed_tests++;
+        pthread_mutex_unlock(&job->mutex);
     }
+
     return NULL;
 }
 
@@ -59,27 +82,35 @@ int main(int argc, char** argv)
         ERR("calloc");
     }
 
+    job_context_t job;
+    job.next_test_idx = 0;
+    job.completed_tests = 0;
+    job.total_tests = test_count;
+    if (pthread_mutex_init(&job.mutex, NULL)) {
+        ERR("pthread_mutex_init");
+    }
+
     Worker* workers = malloc(sizeof(Worker)*worker_count);
     if (!workers) {
         ERR("malloc");
     }
-    int chunk = test_count/worker_count;
-    int r = test_count%worker_count;
-    int currId = 0;
+    // int chunk = test_count/worker_count;
+    // int r = test_count%worker_count;
+    // int currId = 0;
 
     for (int i=0;i<worker_count;i++) {
-        int cnt = chunk;
-        if (i<r) {
-            cnt+=1;
-        }
+        // int cnt = chunk;
+        // if (i<r) {
+        //     cnt+=1;
+        // }
         workers[i].seed = rand();
-        workers[i].start = currId;
-        workers[i].end = currId + cnt;
+
         workers[i].iterations = iterations;
         workers[i].bucket_count = bucket_count;
         workers[i].res = res;
+        workers[i].job = &job;
 
-        currId += cnt;
+        // currId += cnt;
         if (pthread_create(&workers[i].tid, NULL, work, &workers[i])) {
             ERR("pthread_create");
         }
@@ -124,5 +155,6 @@ int main(int argc, char** argv)
     }
     free(res);
     free(workers);
+    pthread_mutex_destroy(&job.mutex);
     return 0;
 }
