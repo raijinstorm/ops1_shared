@@ -91,7 +91,7 @@ void readArgs(int argc, char* argv[], int* p, int*e) {
 
 void cleanup(void* args) {
     pthread_mutex_t* mutex_arg = (pthread_mutex_t*)args;
-    pthread_mutex_lock(mutex_arg);
+    pthread_mutex_unlock(mutex_arg);
 }
 
 void* work(void* args) {
@@ -181,7 +181,7 @@ void* sig_handler(void* args) {
 
                 printf("Cancelling worker %d (SIGUSR2)\n", empIdx);
                 pthread_cancel(sig_args->workers[empIdx].tid);
-                
+
                 active_indices[id] = active_indices[active_workers-1];
                 active_workers--;
                 if (active_workers==0) {
