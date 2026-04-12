@@ -1,0 +1,4 @@
+Name   |   Age   |   Role
+Hermina  68  Customer
+Janusz  45  Manager
+Kamil  22  Cashier

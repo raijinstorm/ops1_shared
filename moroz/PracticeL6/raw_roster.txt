@@ -1,0 +1,3 @@
+Name:Hermina, Age:68, Role:Customer
+Name:Janusz, Age:45, Role:Manager
+Name:Kamil, Age:22, Role:Cashier
