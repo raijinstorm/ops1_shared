@@ -241,8 +241,57 @@ int add_new_client(int sfd)
 ```
 
 ---
+# 9. 32-bit values and byte order
 
-# 9. bulk_read
+- Socket sends raw bytes, not “integers” or “chars”.
+- In this lab we use:
+
+```c
+int32_t data[5];
+````
+
+* One `int32_t` is:
+
+```text
+32 bits = 4 bytes
+```
+
+* Whole message size:
+
+```text
+5 * 4 = 20 bytes
+```
+
+* `htonl()` = host to network long.
+* Use it **before sending** a 32-bit value.
+
+```c
+data[0] = htonl(10);
+data[3] = htonl((int32_t)'+');
+```
+
+* `ntohl()` = network to host long.
+* Use it **after receiving** a 32-bit value.
+
+```c
+int32_t op1 = ntohl(data[0]);
+char op = (char)ntohl(data[3]);
+```
+
+* `htonl()` / `ntohl()` do not know what the value means.
+* We know it from our protocol:
+
+```text
+data[0] = first operand
+data[1] = second operand
+data[2] = result
+data[3] = operator
+data[4] = status
+```
+
+---
+
+# 10. bulk_read
 
 ## Brief summary
 
@@ -276,7 +325,7 @@ ssize_t bulk_read(int fd, char *buf, size_t count)
 
 ---
 
-# 10. bulk_write
+# 11. bulk_write
 
 ## Brief summary
 
@@ -308,7 +357,7 @@ ssize_t bulk_write(int fd, char *buf, size_t count)
 
 ---
 
-# 11. sethandler
+# 12. sethandler
 
 ## Brief summary
 
@@ -332,7 +381,7 @@ int sethandler(void (*f)(int), int sigNo)
 
 ---
 
-# 12. TEMP_FAILURE_RETRY
+# 13. TEMP_FAILURE_RETRY
 
 ## Brief summary
 
@@ -357,7 +406,7 @@ This is useful for system calls such as `read()`, `write()`, `accept()`, and `cl
 
 ---
 
-# 13. ERR
+# 14. ERR
 
 ## Brief summary
 
