@@ -150,3 +150,137 @@ int main(int argc, char** argv)
     }
     return 0;
 }
+
+
+
+//
+// typedef struct __attribute__((__packed__))
+// {
+//     int32_t chunkNo;
+//     int32_t last;
+//     char buf[MAXBUF - 2*sizeof(int32_t)];
+// }Packet;
+//
+// int receive_response(int client_sockfd, struct sockaddr_in serv_addr, int chunkNo)
+// {
+//     struct pollfd pfd;
+//     pfd.fd = client_sockfd;
+//     pfd.events = POLLIN;
+//
+//     int ret = poll(&pfd, 1, 500);
+//
+//     struct sockaddr_in addr;
+//     if (ret>0)
+//     {
+//         while (1)
+//         {
+//             char buf[MAXBUF] = {0};
+//             socklen_t len = sizeof(struct sockaddr_in);
+//             int bytes_received = recvfrom(client_sockfd, buf, MAXBUF, MSG_DONTWAIT,(struct sockaddr*)&addr, &len);
+//             if (bytes_received<0)
+//             {
+//                 if (errno == EAGAIN)
+//                 {
+//                     return -1;
+//                 }
+//                 ERR("recvfrom");
+//             }
+//             if (memcmp(&addr, &serv_addr, sizeof(struct sockaddr_in)) != 0)
+//             {
+//                 continue;
+//             }
+//             Packet* recv_packet = (Packet*)buf;
+//             recv_packet->chunkNo = ntohl(recv_packet->chunkNo);
+//             if (recv_packet->chunkNo!=chunkNo)
+//                 continue;
+//
+//             return 1;
+//         }
+//     }
+//
+//     if (ret<0)
+//     {
+//         ERR("epoll_wait");
+//     }
+//     return ret;
+// }
+//
+// void client_work(int client_sockfd, struct sockaddr_in serv_addr, int filefd, int file_size)
+// {
+//     int total_read = 0;
+//     char buf[MAXBUF] = {0};
+//     int offset = 2*sizeof(int32_t);
+//     int chunkNo = 0;
+//     int last = 0;
+//     socklen_t len = sizeof(serv_addr);
+//     while (total_read<file_size)
+//     {
+//         int to_read = MAXBUF-offset;
+//         if (file_size-total_read<to_read)
+//         {
+//             to_read = file_size-total_read;
+//             last = 1;
+//         }
+//         int bytes_read = bulk_read(filefd, buf+offset, to_read);
+//         if (bytes_read < 0)
+//         {
+//             ERR("read");
+//         }
+//
+//         Packet* pckt = (Packet*)buf;
+//         pckt->chunkNo = htonl(chunkNo);
+//         pckt->last = htonl(last);
+//         int i=0;
+//         while (i<5)
+//         {
+//             if (sendto(client_sockfd, pckt, MAXBUF, 0, (struct sockaddr*)&serv_addr, len)<0)
+//             {
+//                 ERR("sendto");
+//             }
+//             int ret = receive_response(client_sockfd, serv_addr, chunkNo);
+//             if (ret>0)
+//                 break;
+//             i++;
+//         }
+//         if (i==5)
+//         {
+//             return;
+//         }
+//         total_read+=bytes_read;
+//         chunkNo++;
+//         memset(buf, 0, MAXBUF);
+//     }
+// }
+//
+// int main(int argc, char** argv)
+// {
+//     if (argc!=4)
+//     {
+//         usage(argv[0]);
+//     }
+//     int client_sockfd = make_udp_socket();
+//     struct sockaddr_in serv_addr = make_address(argv[1], argv[2]);
+//
+//     int filefd = open(argv[3], O_RDONLY, 0666);
+//     if (filefd < 0)
+//     {
+//         ERR("open");
+//     }
+//     struct stat file_status;
+//     if (stat(argv[3], &file_status) < 0) {
+//         ERR("stat");
+//     }
+//     ssize_t file_size = file_status.st_size;
+//
+//     client_work(client_sockfd, serv_addr, filefd, file_size);
+//
+//     if (close(filefd)<0)
+//     {
+//         ERR("close");
+//     }
+//     if (close(client_sockfd)<0)
+//     {
+//         ERR("close");
+//     }
+//     return 0;
+// }

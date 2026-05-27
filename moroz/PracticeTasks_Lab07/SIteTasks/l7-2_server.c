@@ -37,95 +37,111 @@ int bind_inet_socket(uint16_t port,int type)
     return socketfd;
 }
 
-typedef struct Conn
-{
-    int free;
-    int32_t chunkNo;
-    struct sockaddr_in addr;
-}Conn;
-
-typedef struct Packet
+typedef struct __attribute__((__packed__))
 {
     int32_t chunkNo;
     int32_t last;
-    char data[MAXBUF-2*sizeof(int32_t)];
-}Packet __attribute__((__packed__));
+    char buf[MAXBUF - 2*sizeof(int32_t)];
+}Packet;
 
-int find_index(Conn* connections, struct sockaddr_in newAddr)
+typedef struct Connection
 {
-    int pos = -1, last_free_pos=-1;
+    int free;
+    int32_t chunkNo;
+    int32_t last;
+    struct sockaddr_in addr;
+}Connection;
+
+int find_client(Connection* connections, struct sockaddr_in* addr)
+{
+    int pos = -1, last_client = -1, empty = -1;
     for (int i=0;i<MAXADDR;i++)
     {
-        if (memcmp(&connections[i].addr, &newAddr, sizeof(struct sockaddr_in)) == 0)
+        if (memcmp(&connections[i].addr, addr, sizeof(struct sockaddr_in)) == 0)
         {
             pos = i;
-            return pos;
+            break;
         }
         if (connections[i].free)
         {
-            last_free_pos = i;
+            empty = i;
+        }
+        if (connections[i].last)
+        {
+            last_client = i;
         }
     }
-    if (last_free_pos!=-1)
+    if (pos==-1 && empty!=-1)
     {
-        pos = last_free_pos;
-        connections[last_free_pos].free = 0;
-        connections[last_free_pos].addr = newAddr;
-        connections[last_free_pos].chunkNo = 0;
+        connections[pos].free = 0;
+        connections[pos].addr = *addr;
+        connections[pos].chunkNo = 0;
+        connections[pos].last = 0;
+    }
+    else if (pos == -1 && last_client!=-1)
+    {
+        pos = last_client;
+        connections[pos].free = 0;
+        connections[pos].addr = *addr;
+        connections[pos].chunkNo = 0;
+        connections[pos].last = 0;
     }
     return pos;
 }
 
-void server_work(int sockfd)
+void server_work(int server_sock)
 {
-    char buf[MAXBUF];
-    Conn connections[MAXADDR];
     struct sockaddr_in addr;
-    socklen_t addrlen = sizeof(struct sockaddr_in);
+    socklen_t addrlen = sizeof(addr);
+    char buffer[MAXBUF+1];
+    Connection connections[MAXADDR];
     for (int i=0;i<MAXADDR;i++)
     {
         connections[i].free = 1;
+        memset(&connections[i].addr,0,sizeof(struct sockaddr_in));
+        connections[i].chunkNo = 0;
+        connections[i].last = 0;
     }
     while (1)
     {
-        size_t received_bytes;
-        if (TEMP_FAILURE_RETRY((received_bytes = recvfrom(sockfd, buf,MAXBUF-1,0,(struct sockaddr *)&addr,&addrlen))<0))
+        if (recvfrom(server_sock, buffer, MAXBUF+1, 0, (struct sockaddr*)&addr, &addrlen)<0)
         {
             ERR("recvfrom");
         }
-        int index = find_index(connections, addr);
-        if (index>=0)
+        buffer[MAXBUF] = '\0';
+        Packet* packet = (Packet*)buffer;
+        int idx = find_client(connections, &addr);
+        if (idx == -1)
         {
-            buf[received_bytes] = '\0';
-            Packet* pckt = (Packet*)buf;
-            int32_t receivedChunkNo = ntohl(pckt->chunkNo);
-            int32_t last = ntohl(pckt->last);
-            if (connections[index].chunkNo == receivedChunkNo)
+            memset(buffer, 0, sizeof(buffer));
+            continue;
+        }
+        int32_t chunkNo =  ntohl(packet->chunkNo);
+        int32_t lastFlag = ntohl(packet->last);
+        if (connections[idx].chunkNo+1 == chunkNo)
+        {
+            if (lastFlag)
             {
-                if (last)
-                {
-                    printf("Last Chunk: %d\n%s\n", receivedChunkNo, pckt->data);
-                    connections[index].free = 1;
-                }
-                else
-                {
-                    printf("Part %d\n%s\n", receivedChunkNo, pckt->data);
-                }
-                connections[index].chunkNo++;
+                printf("Last part: %d\n%s\n",chunkNo,packet->buf);
+                connections[idx].last = 1;
             }
-            if (connections[index].chunkNo<receivedChunkNo)
+            else
             {
-                continue;
+                printf("Part %d\n%s\n",chunkNo,packet->buf);
             }
-            if (TEMP_FAILURE_RETRY(sendto(sockfd, buf, MAXBUF, 0,(struct sockaddr *)&addr,addrlen))<0)
-            {
-                if (EPIPE == errno)
-                    connections[index].free = 1;
-                ERR("sendto");
-            }
+            connections[idx].chunkNo++;
+        }
+        else if (chunkNo>connections[idx].chunkNo+1)
+        {
+            continue;
+        }
+        if (sendto(server_sock, buffer, MAXBUF, 0, (struct sockaddr*)&connections[idx].addr, addrlen)<0)
+        {
+            ERR("sendto");
         }
     }
 }
+
 
 int main(int argc, char** argv)
 {
@@ -133,15 +149,14 @@ int main(int argc, char** argv)
     {
         usage(argv[0]);
     }
-    sethandler(SIG_IGN, SIGPIPE);
     uint16_t port = atoi(argv[1]);
-    int sockfd = bind_inet_socket(port, SOCK_DGRAM);
+    int server_sock = bind_inet_socket(port, SOCK_DGRAM);
 
-    server_work(sockfd);
+    server_work(server_sock);
 
-    if (close(sockfd)<0)
+    if (close(server_sock)<0)
     {
         ERR("close");
     }
-    fprintf(stderr, "Server has terminated.\n");
+    return 0;
 }
