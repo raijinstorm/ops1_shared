@@ -110,3 +110,52 @@ ssize_t bulk_write(int fd, char *buf, size_t count)
     } while (count > 0);
     return len;
 }
+
+
+
+//change this to my needs
+#define MAX_ITEMS 128
+
+//calculate the number of bytes needed
+#define BITMAP_SIZE ((MAX_ITEMS / 8) + (MAX_ITEMS % 8 != 0))
+
+typedef struct {
+    uint8_t bits[BITMAP_SIZE];
+} BitMap;
+
+//initialise
+void init_bitmap(BitMap* bmp) {
+    memset(bmp->bits, 0, sizeof(bmp->bits));
+}
+
+//turning a bit on using a "mask" 1<<bit_offset
+void set_bit(BitMap* bmp, int index) {
+    if (index < 0 || index >= MAX_ITEMS) return;
+
+    int byte_idx = index / 8;
+    int bit_offset = index % 8;
+
+    bmp->bits[byte_idx] |= (1 << bit_offset);
+}
+
+//turning a bit off
+void clear_bit(BitMap* bmp, int index) {
+    if (index < 0 || index >= MAX_ITEMS) return;
+
+    int byte_idx = index / 8;
+    int bit_offset = index % 8;
+
+
+    bmp->bits[byte_idx] &= ~(1 << bit_offset);
+}
+
+//check if a bit is ON
+bool check_bit(BitMap* bmp, int index) {
+    if (index < 0 || index >= MAX_ITEMS) return false;
+
+    int byte_idx = index / 8;
+    int bit_offset = index % 8;
+
+    //use Bitwise AND (&) to isolate the bit and check if it's non-zero
+    return (bmp->bits[byte_idx] & (1 << bit_offset)) != 0;
+}
