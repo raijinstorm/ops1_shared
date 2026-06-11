@@ -19,6 +19,28 @@ __result;                                  \
 }))
 #endif
 
+/*
+*USEFUL FOR DEBUGGING MULTIPLE PROCESSES (OR NOT): //before run
+*                                         set detach-on-fork off
+                                          set follow-fork-mode parent
+                                          set schedule-multiple on
+                                          //after run
+                                          info inferiors   //lists all the processes GDB is currently tracking
+                                          inferior <inferior_number> //switch inferiors and use bt
+                                          // or
+                                          thread apply all bt
+ */
+
+/*
+ *USEFUL FOR DEBUGGING MULTIPLE THREADS:  //after ctrl+c
+ *                                        thread apply all bt
+ *                                        //if needed info on a specific thread
+ *                                        info threads
+ *                                        thread 3
+ *                                        //then use for example
+ *                                        bt
+ */
+
 void usage(char* name)
 {
     printf("%s <S> <in_port>\n", name);
