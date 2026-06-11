@@ -17,49 +17,68 @@ void usage(char *name)
     exit(EXIT_FAILURE);
 }
 
-void write_to_fifo(int fifo, int filefd) {
-    ssize_t count;
-    char buffer[PIPE_BUF];
-    char* buf;
-    *((pid_t *)buffer) = getpid();
-    buf = buffer + sizeof(pid_t);
-    do {
-        if ((count = read(filefd,buf,MSG_SIZE))<0) {
+void write_fifo(int fifo, char* filename)
+{
+    struct stat file_status;
+    if (stat(filename, &file_status) < 0) {
+        ERR("stat");
+    }
+    size_t file_size = file_status.st_size;
+
+    int filefd = open(filename, O_RDONLY);
+
+    int bytes_sent = 0;
+    char buf[PIPE_BUF] = {0};
+    while (bytes_sent<file_size)
+    {
+        pid_t pid = getpid();
+        memcpy(buf, &pid, sizeof(pid_t));
+        int bytes_read = read(filefd, buf+sizeof(pid_t), MSG_SIZE);
+        if (bytes_read<0)
+        {
             ERR("read");
         }
-        if (count<MSG_SIZE) {
-            memset(buf+count,0,MSG_SIZE - count);
+
+        if (write(fifo, buf, PIPE_BUF)<0)
+        {
+            ERR("write");
         }
-        if (count>0) {
-            if (write(fifo, buffer, PIPE_BUF) < 0) {
-                ERR("write");
-            }
-        }
-    }while (count == MSG_SIZE);
+        bytes_sent += bytes_read;
+        memset(buf,0,PIPE_BUF);
+    }
+
+    if (close(filefd)<0)
+    {
+        ERR("close");
+    }
 }
 
-int main (int argc, char** argv) {
-    int fifo, filefd;
-    if (argc!=3) {
+int main(int argc, char** argv)
+{
+    if (argc!=3)
+    {
         usage(argv[0]);
     }
 
-    if (mkfifo(argv[1], S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)) {
-        if (errno!=EEXIST) {
+    if (mkfifo(argv[1], S_IRUSR | S_IRGRP | S_IWUSR | S_IWGRP)<0)
+    {
+        if (errno != EEXIST)
+        {
             ERR("mkfifo");
         }
     }
-    if ((fifo = open(argv[1], O_WRONLY))<0) {
+
+    int fifo = open(argv[1], O_WRONLY);
+    if (fifo<0)
+    {
         ERR("open");
     }
-    if ((filefd = open(argv[2], O_RDONLY))<0) {
-        ERR("open");
-    }
-    write_to_fifo(fifo, filefd);
-    if (close(fifo) < 0) {
-        ERR("close");
-    }
-    if (close(filefd) < 0) {
+
+
+    write_fifo(fifo, argv[2]);
+
+    if (close(fifo)<0)
+    {
         ERR("close");
     }
     return 0;
