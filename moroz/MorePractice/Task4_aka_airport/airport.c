@@ -368,3 +368,66 @@ int main(int argc, char** argv)
     unlink(AIRPORT_FIFO);
     shm_unlink(SHM_NAME);
 }
+
+
+
+
+// void parse_packet(int sockfd) {
+//     uint8_t buffer[MAX_BUFFER];
+//
+//     ssize_t received_bytes = recvfrom(sockfd, buffer, sizeof(buffer), 0, NULL, NULL);
+//
+//     if (received_bytes < 0) {
+//         perror("recvfrom failed");
+//         return;
+//     }
+//     if (received_bytes < 1) {
+//         fprintf(stderr, "Packet too small even for a header.\n");
+//         return;
+//     }
+//
+//     int offset = 0;
+//
+//     //read count
+//     uint8_t count = buffer[offset];
+//     offset += sizeof(uint8_t);
+//
+//     //overflow check
+//     if (count > MAX_NUMBERS) {
+//         fprintf(stderr, "Received too many numbers.\n");
+//         return;
+//     }
+//
+//     //extracting integers
+//     int32_t numbers[MAX_NUMBERS];
+//
+//     for (int i = 0; i < count; i++) {
+//         int32_t temp;
+//         memcpy(&temp, buffer + offset, sizeof(int32_t));
+//
+//
+//         numbers[i] = ntohl(temp);
+//
+//         offset += sizeof(int32_t);
+//     }
+//
+//     //leftover string
+//     int string_length = received_bytes - offset;
+//     char text_data[256];
+//
+//     if (string_length > 0) {
+//         //copy text
+//         memcpy(text_data, buffer + offset, string_length);
+//
+//
+//         text_data[string_length] = '\0';
+//     } else {
+//         text_data[0] = '\0';
+//     }
+//
+//     printf("Received %d numbers: ", count);
+//     for(int i = 0; i < count; i++) {
+//         printf("%d ", numbers[i]);
+//     }
+//     printf("\nText: %s\n", text_data);
+// }
